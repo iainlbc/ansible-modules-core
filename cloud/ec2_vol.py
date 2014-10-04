@@ -48,6 +48,14 @@ options:
     required: false
     default: null
     aliases: []
+  volume_type:
+    description:
+      - Type of EBS volume volume: gp2 (general purpose SSD), io1 (Provisioned IOPS SSD), standard (EBS magnetic)
+    required: false
+    default: standard
+    aliases: []
+    choices: ['gp2', 'io1', 'standard']
+    version_added: "1.8"    
   iops:
     description:
       - the provisioned IOPs you want to associate with this volume (integer).
@@ -118,6 +126,14 @@ EXAMPLES = '''
     volume_size: 5 
     iops: 200
     device_name: sdd
+
+# Example using general purpose SSD
+- local_action:
+    module: ec2_vol
+    instance: XXXXXX
+    volume_size: 5
+    volume_type: gp2
+    device_name: xvdf
 
 # Example using snapshot id
 - local_action:
@@ -254,11 +270,12 @@ def create_volume(module, ec2, zone):
     encrypted = module.params.get('encrypted')
     volume_size = module.params.get('volume_size')
     snapshot = module.params.get('snapshot')
-    # If custom iops is defined we use volume_type "io1" rather than the default of "standard"
-    if iops:
+    volume_type = module.params.get('volume_type')
+    # If custom iops is defined we use volume_type "io1" rather than the default of "standard", as long as volume type != gp2
+    if iops and volume_type == "standard":
         volume_type = 'io1'
-    else:
-        volume_type = 'standard'
+    elif iops and volume_type == "gp2":
+        module.fail_json(msg = "Parameters are not compatible: [iops and volume_type of gp2] General Purpose SSD's cannot use provisioned iops.")
 
     # If no instance supplied, try volume creation based on module parameters.
     if name or id:
@@ -343,7 +360,8 @@ def main():
             device_name = dict(),
             zone = dict(aliases=['availability_zone', 'aws_zone', 'ec2_zone']),
             snapshot = dict(),
-            state = dict(choices=['absent', 'present', 'list'], default='present')
+            state = dict(choices=['absent', 'present', 'list'], default='present'),
+            volume_type = dict(choices=['standard', 'io1', 'gp2'], default='standard')
         )
     )
     module = AnsibleModule(argument_spec=argument_spec)
@@ -358,6 +376,7 @@ def main():
     zone = module.params.get('zone')
     snapshot = module.params.get('snapshot')
     state = module.params.get('state')
+    volume_type = module.params.get('volume_type')
 
     ec2 = ec2_connect(module)
 
